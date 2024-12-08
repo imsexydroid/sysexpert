@@ -1,0 +1,70 @@
+{
+    "uid": "design-the-uber-api",
+    "name": "Design The Uber API",
+    "acl": {
+        "isFree": false,
+        "isFreeForStudents": false,
+        "productRequired": [
+            "systemsexpert"
+        ],
+        "isAvailable": true
+    },
+    "releaseDate": "2020-06-03T12:00:00-05:00",
+    "isReleased": true,
+    "video": {
+        "vimeoId": "425290208",
+        "duration": 0,
+        "annotations": [],
+        "instructor": "",
+        "style": "interview"
+    },
+    "prompt": "",
+    "walkthrough": [
+        {
+            "title": "Gathering Requirements",
+            "content": "<p>\n  As with any API design interview question, the first thing that we want to do\n  is to gather API requirements; we need to figure out what API we're building\n  exactly.\n</p>\n\n<p>\n  We're designing the core ride-hailing service that Uber offers. Passengers can\n  book a ride from their phone, at which point they're matched with a driver;\n  they can track their driver's location throughout the ride, up until the ride\n  is finished or canceled; and they can also see the price of the ride as well\n  as the estimated time to destination throughout the trip, amongst other\n  things.\n</p>\n\n<p>\n  The core taxiing service that Uber offers has a passenger-facing side and a\n  driver-facing side; we're going to be designing the API for both sides.\n</p>"
+        },
+        {
+            "title": "Coming Up With A Plan",
+            "content": "<p>\n  It's important to organize ourselves and to lay out a clear plan regarding how\n  we're going to tackle our design. What are the major, potentially contentious\n  parts of our API? Why are we making certain design decisions?\n</p>\n<p>\n  We're going to center our API around a <i>Ride</i> entity; every Uber ride\n  will have an associated <i>Ride</i> containing information about the ride,\n  including information about its passenger and driver.\n</p>\n<p>\n  Since a normal Uber ride can only have one passenger (one passenger\n  account--the one that hails the ride) and one driver, we're going to cleverly\n  handle all permissioning related to ride operations through passenger and\n  driver IDs. In other words, operations like <i>GetRide</i> and\n  <i>EditRide</i> will purely rely on a passed userId, the userId of the\n  passenger or driver calling them, to return the appropriate ride tied to that\n  passenger or driver.\n</p>\n<p>\n  We'll start by defining the <i>Ride</i> entity before designing the\n  passenger-facing API and then the driver-facing API.\n</p>"
+        },
+        {
+            "title": "Entities",
+            "content": "<b>Ride</b>\n<p>\n  The <i>Ride</i> entity will have a unique id, info about its passenger and its\n  driver, a status, and other details about the ride.\n</p>\n<ul>\n  <li>rideId: <i>string</i></li>\n  <li>passengerInfo: <i>PassengerInfo</i></li>\n  <li>driverInfo?: <i>DriverInfo</i></li>\n  <li>\n    rideStatus: <i>RideStatus</i> - enum\n    CREATED/MATCHED/STARTED/FINISHED/CANCELED\n  </li>\n  <li>start: <i>GeoLocation</i></li>\n  <li>destination: <i>GeoLocation</i></li>\n  <li>createdAt: <i>timestamp</i></li>\n  <li>startTime: <i>timestamp</i></li>\n  <li>estimatedPrice: <i>int</i></li>\n  <li>timeToDestination: <i>int</i></li>\n</ul>\n<p>\n  We'll explain why the <i>driverInfo</i> is optional when we get to the API\n  endpoints.\n</p>\n<br />\n<b>PassengerInfo</b>\n<ul>\n  <li>id: <i>string</i></li>\n  <li>name: <i>string</i></li>\n  <li>rating: <i>int</i></li>\n</ul>\n\n<b>DriverInfo</b>\n<ul>\n  <li>id: <i>string</i></li>\n  <li>name: <i>string</i></li>\n  <li>rating: <i>int</i></li>\n  <li>ridesCount: <i>int</i></li>\n  <li>vehicleInfo: <i>VehicleInfo</i></li>\n</ul>\n\n<b>VehicleInfo</b>\n<ul>\n  <li>licensePlate: <i>string</i></li>\n  <li>description: <i>string</i></li>\n</ul>"
+        },
+        {
+            "title": "Passenger API",
+            "content": "<p>\n  The passenger-facing API will be fairly straightforward. It'll consist of\n  simple CRUD operations around the <i>Ride</i> entity, as well as an endpoint\n  to stream a driver's location throughout a ride.\n</p>\n<pre>\nCreateRide(userId: string, pickup: Geolocation, destination: Geolocation)\n  => Ride\n</pre>\n<p>\n  Usage: called when a passenger books a ride; a <i>Ride</i> is created with no\n  <i>DriverInfo</i> and with a <b>CREATED</b> <i>RideStatus</i>; the Uber\n  backend calls an internal <i>FindDriver</i> API that uses an algorithm to find\n  the most appropriate driver; once a driver is found and accepts the ride, the\n  backend calls <i>EditRide</i> with the driver's info and with a\n  <b>MATCHED</b> <i>RideStatus</i>.\n</p>\n<pre>\nGetRide(userId: string)\n  => Ride\n</pre>\n<p>\n  Usage: polled every couple of seconds after a ride has been created and until\n  the ride has a status of <b>MATCHED</b>; afterwards, polled every 20-90\n  seconds throughout the trip to update the ride's estimated price, its time to\n  destination, its <i>RideStatus</i> if it's been canceled by the driver, etc..\n</p>\n<pre>\nEditRide(userId: string, [...params?: all properties on the Ride object that need to be edited])\n  => Ride\n</pre>\n<pre>\nCancelRide(userId: string)\n  => void\n</pre>\n<p>\n  Wrapper around <i>EditRide</i> -- effectively calls\n  <i>EditRide(userId: string, rideStatus: CANCELLED)</i>.\n</p>\n<pre>\nStreamDriverLocation(userId: string)\n  => Geolocation\n</pre>\n<p>\n  Usage: continuously streams the location of a driver over a long-lived\n  websocket connection; the driver whose location is streamed is the one\n  associated with the <i>Ride</i> tied to the passed <i>userId</i>.\n</p>"
+        },
+        {
+            "title": "Driver API",
+            "content": "<p>\n  The driver-facing API will rely on some of the same CRUD operations around the\n  <i>Ride</i> entity, and it'll also have a <i>SetDriverStatus</i> endpoint as\n  well as an endpoint to push the driver's location to passengers who are\n  streaming it.\n</p>\n<pre>\nSetDriverStatus(userId: string, driverStatus: DriverStatus)\n  => void\n\nDriverStatus: enum UNAVAILABLE/IN RIDE/STANDBY\n</pre>\n<p>\n  Usage: called when a driver wants to look for a ride, is starting a ride, or\n  is done for the day; when called with <b>STANDBY</b>, the Uber backend calls\n  an internal <i>FindRide</i> API that uses an algorithm to enqueue the driver\n  in a queue of drivers waiting for rides and to find the most appropriate ride;\n  once a ride is found, the ride is internally locked to the driver for 30\n  seconds, during which the driver can accept or reject the ride; once the\n  driver accepts the ride, the internal backend calls <i>EditRide</i> with the\n  driver's info and with a <b>MATCHED</b> <i>RideStatus</i>.\n</p>\n<pre>\nGetRide(userId: string)\n  => Ride\n</pre>\n<p>\n  Usage: polled every 20-90 seconds throughout the trip to update the ride's\n  estimated price, its time to destination, whether it's been canceled, etc..\n</p>\n<pre>\nEditRide(userId: string, [...params?: all properties on the Ride object that need to be edited])\n  => Ride\n</pre>\n<pre>\nAcceptRide(userId: string)\n  => void\n</pre>\n<p>\n  Calls <i>EditRide(userId, MATCHED)</i> and\n  <i>SetDriverStatus(userId, IN_RIDE)</i>.\n</p>\n<pre>\nCancelRide(userId: string)\n  => void\n</pre>\n<p>\n  Wrapper around <i>EditRide</i> -- effectively calls\n  <i>EditRide(userId, CANCELLED)</i>.\n</p>\n<pre>\nPushLocation(userId: string, location: Geolocation)\n  => void\n</pre>\n<p>\n  Usage: continuously called by a driver's phone throughout a ride; pushes the\n  driver's location to the relevant passenger who's streaming the location; the\n  passenger is the one associated with the <i>Ride</i> tied to the passed\n  <i>userId</i>.\n</p>"
+        },
+        {
+            "title": "UberPool",
+            "content": "<p>\n  As a stretch goal, your interviewer might ask you to think about how you'd\n  expand your design to handle UberPool rides.\n</p>\n<p>\n  UberPool rides allow multiple passengers (different Uber accounts) to share an\n  Uber ride for a cheaper price.\n</p>\n<p>\n  One way to handle UberPool rides would be to allow <i>Ride</i> objects to have\n  multiple <i>passengerInfo</i>s. In this case, <i>Ride</i>s would also have to\n  maintain a list of all destinations that the ride will stop at, as well as the\n  relevant final destinations for individual passengers.\n</p>\n<p>\n  Perhaps a cleaner way to handle UberPool rides would be to introduce an\n  entirely new entity, a <i>PoolRide</i> entity, which would have a list of\n  <i>Ride</i>s attached to it. Passengers would still call the\n  <i>CreateRide</i> endpoint when booking an UberPool ride, and so they would\n  still have their own, normal <i>Ride</i> entity, but this entity would be\n  attached to a <i>PoolRide</i> entity with the rest of the UberPool ride\n  information.\n</p>\n<p>\n  Drivers would likely have an extra <i>DriverStatus</i> value to indicate if\n  they were in a ride but still accepting new UberPool passengers.\n</p>\n<p>\n  Most of the other functionality would remain the same; passengers and drivers\n  would still continuously poll the <i>GetRide</i> endpoint for updated\n  information about the ride, passengers would still stream their driver's\n  location, passengers would still be able to cancel their individual rides,\n  etc..\n</p>"
+        }
+    ],
+    "hints": [
+        {
+            "question": "Uber has a lot of different services: there\u2019s the core ride-hailing Uber service, there\u2019s UberEats, there\u2019s UberPool--are we designing the API for all of these services, or just for one of them?",
+            "answer": "Let\u2019s just design the core rides API -- not UberEats or UberPool."
+        },
+        {
+            "question": "At first thought, it seems like we're going to need both a passenger-facing API and a driver-facing API--does that make sense, and if yes, should we design both?",
+            "answer": "Yes, that totally makes sense. And yes, let\u2019s design both, starting with the passenger-facing API."
+        },
+        {
+            "question": "To make sure we\u2019re on the same page, this is the functionality that I'm envisioning this API will support: A user (a passenger) goes on their phone and hails a ride; they get matched with a driver; then they can track their ride as it\u2019s in progress, until they reach their destination, at which point the ride is complete. Throughout this process, there are a few more features to support, like being able to track where the passenger's driver is before the passenger gets picked up, maybe being able to cancel rides, etc.. Does this capture most of what you had in mind?",
+            "answer": "Yes, this is precisely what I had in mind. And you can work out the details as you start designing the API."
+        },
+        {
+            "question": "Do we need to handle things like creating an Uber account, setting up payment preferences, contacting Uber, etc..? What about things like rating a driver, tipping a driver, etc.?",
+            "answer": "For now, let\u2019s skip those and really focus on the core taxiing service."
+        },
+        {
+            "question": "Just to confirm, you want me to write out function signatures for various API endpoints, including parameters, their types, return values, etc., right?",
+            "answer": "Yup, exactly."
+        }
+    ]
+}

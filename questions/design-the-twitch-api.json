@@ -1,0 +1,86 @@
+{
+    "uid": "design-the-twitch-api",
+    "name": "Design The Twitch API",
+    "acl": {
+        "isFree": false,
+        "isFreeForStudents": false,
+        "productRequired": [
+            "systemsexpert"
+        ],
+        "isAvailable": true
+    },
+    "releaseDate": "2021-08-26T12:00:00-04:00",
+    "isReleased": true,
+    "video": {
+        "vimeoId": "591929141",
+        "duration": 0,
+        "annotations": [],
+        "instructor": "",
+        "style": "tutorial"
+    },
+    "prompt": "<p>\n  Design every API endpoint that's interacted with when a user is on an\n  individual Twitch streamer's channel page, watching their livestream.\n</p>\n",
+    "walkthrough": [
+        {
+            "title": "Gathering Requirements",
+            "content": "<p>\n  As with any API design interview question, the first thing that we want to do\n  is to gather API requirements; we need to figure out what API we're building\n  exactly.\n</p>\n<p>\n  We're designing every API endpoint that's interacted with when a user is on an\n  individual Twitch streamer's channel page, watching their livestream.\n  Specifically, we need to handle:\n</p>\n<ul>\n  <li>\n    displaying the streamer's channel info (description text, follower count,\n    etc.)\n  </li>\n  <li>following and unfollowing the streamer</li>\n  <li>subscribing to and unsubscribing from the streamer</li>\n  <li>\n    seeing the live chat and sending messages; sending messages should only be\n    allowable if the user isn't banned\n  </li>\n  <li>seeing the livestream and being able to pause / unpause it</li>\n  <li>\n    seeing the number of concurrent viewers of the stream, which should\n    automatically be updated every 30 seconds or so\n  </li>\n</ul>"
+        },
+        {
+            "title": "Coming Up With A Plan",
+            "content": "<p>\n  It's important to organize ourselves and to lay out a clear plan regarding how\n  we're going to tackle our design. What are the major, potentially contentious\n  parts of our API? Why are we making certain design decisions?\n</p>\n<p>\n  Fortunately for us, the various functionalities that we have to support\n  effectively lay out a step-by-step plan for us, so we'll simply follow that.\n</p>\n<p>\n  Of note, all of the API endpoints that we'll define will take in, by default,\n  the caller's user-specific authentication token as an authorization header.\n  This token will be used by the backend to identify which user is calling each\n  API endpoint.\n</p>\n<p>\n  We'll also be passing a <i>channelId</i> as a parameter to all of the\n  endpoints, which will be the unique username of the streamer in question.\n</p>"
+        },
+        {
+            "title": "Channel Info",
+            "content": "<p>\n  This is the most straightforward piece of functionality on the page, since it\n  only consists of displaying static data about the streamer.\n</p>\n<p>\n  The user will call the <i>GetChannelInfo</i> endpoint, which will return the\n  relevant entity, <i>ChannelInfo</i>, to be displayed on the page.\n</p>\n<b>ChannelInfo</b>\n<ul>\n  <li>name: <i>string</i></li>\n  <li>description: <i>string</i></li>\n  <li>currentStreamTitle: <i>string</i></li>\n  <li>followerCount: <i>int</i></li>\n</ul>\n<p>\n  This entity might have more fields, but these are the most important ones.\n</p>\n<pre>\nGetChannelInfo(channelId: string)\n  => ChannelInfo\n</pre>"
+        },
+        {
+            "title": "Following",
+            "content": "<p>\n  The follow status is binary: either the user is following the streamer, or\n  they aren't. Thus, we can support the follow functionality with a single\n  endpoint that uses a toggle mechanism, whereby the backend sets the follow\n  status to the opposite of what's currently stored in the database.\n</p>\n<pre>\nToggleFollow(channelId: string)\n  => FollowState (<b>FOLLOWING</b> or <b>NOT_FOLLOWING</b>)\n</pre>\n<p>\n  Naturally, this endpoint will be called when the user presses the \"Follow\" /\n  \"Unfollow\" button.\n</p>\n<p>\n  Note that we haven't yet handled how to know what the user's follow state is.\n  In other words, how do we know whether to show \"Follow\" or \"Unfollow\" to the\n  user? See the <b>Relationship To Channel</b> section for details.\n</p>"
+        },
+        {
+            "title": "Subscribing",
+            "content": "<p>\n  Subscribing is similar to following. However, unlike following, since there\n  are more details to be provided when a user subscribes to a channel\n  (subscription tier and payment information), we'll separate the acts of\n  subscribing and unsubscribing into two endpoints.\n</p>\n<pre>\nCreateSubscription(channelId: string, subscriptionInfo: SubscriptionInfo, paymentInfo: PaymentInfo)\n  => Subscription\n\nCancelSubscription(channelId: string)\n  => Subscription\n</pre>\n<p>\n  Naturally, these endpoints will be called when the user presses the\n  \"Subscribe\" / \"Unsubscribe\" button.\n</p>\n<p>\n  Note that we haven't yet handled how to know what the user's subscription\n  state is. In other words, how do we know whether to show \"Subscribe\" or\n  \"Unsubscribe\" to the user? See the <b>Relationship To Channel</b> section for\n  details.\n</p>"
+        },
+        {
+            "title": "Chat",
+            "content": "<p>\n  To handle the chat's functionality, we'll need two endpoints and a\n  <i>Message</i> entity.\n</p>\n<b>Message</b>\n<ul>\n  <li>sender: <i>string</i>, the username of the sender</li>\n  <li>text: <i>string</i></li>\n  <li>timestamp: <i>string</i>, in ISO format</li>\n</ul>\n<pre>\nStreamChat(channelId: string)\n  => Message\n\nSendMessage(channelId: string, message: string)\n  => string | Error if user is banned\n</pre>\n<p>\n  The <i>StreamChat</i> endpoint streams the stream's chat messages over a\n  long-lived websocket connection and will be called once on page load.\n</p>\n<p>\n  The <i>SendMessage</i> endpoint will naturally be called whenever the user\n  sends a message, and we can have the backend take care of timestamping\n  messages and providing both the sender and the timestamp on the\n  <i>Message</i> entity.\n</p>\n<p>\n  We can handle Twitch emotes by representing them with a special string format,\n  like wrapping unique emote IDs in colons, as follows: <b>:emote-id:</b>. A\n  Twitch a message will therefore look like this in string format:\n</p>\n<pre>\n\"This stream is so fun to watch :kappa:\"\n</pre>\n<p>\n  The UI knows to detect this special string format and to display emotes\n  appropriately. The UI also knows not to display messages sent by the user in\n  question and received via <i>StreamChat</i>, since those messages will be\n  displayed as soon as the user sends them via <i>SendMessage</i>.\n</p>\n<p>\n  While <i>SendMessage</i> returns an error if the user is banned from the chat,\n  we won't actually allow the user to hit this endpoint if they're banned. That\n  being said, we haven't yet handled how to know whether a user is banned. See\n  the <b>Relationship To Channel</b> section for details.\n</p>"
+        },
+        {
+            "title": "Video",
+            "content": "<p>\n  To display the actual video of the livestream, we'll open another long-lived\n  websocket connection on page load, which will stream the video.\n</p>\n<pre>\nStreamVideo(channelId: string, videoQuality: VideoQuality)\n  => VideoInfo\n</pre>\n<p>\n  When this endpoint is called, we can imagine that the backend increases the\n  concurrent-viewer count of the relevant stream in some database, which will be\n  used in the next section to display the number of concurrent viewers to the\n  user. When the long-lived connection is terminated (on tab close or page\n  leave), the backend will decrease the relevant concurrent-viewer count in the\n  database.\n</p>\n<p>\n  Lastly, when the user pauses the video, the UI still streams the video, but it\n  simply doesn't display it.\n</p>"
+        },
+        {
+            "title": "Concurrent Viewers",
+            "content": "<p>\n  Displaying the number of concurrent viewers watching a stream at any given\n  time can easily be accomplished by polling an endpoint every 30 seconds or so,\n  which reads from the database that stores every stream's concurrent-viewer\n  count.\n</p>\n<pre>\nGetConcurrentViewers(channelId: string)\n  => int\n</pre>"
+        },
+        {
+            "title": "Relationship To Channel",
+            "content": "<p>\n  There are a few pieces of functionality on the page that have to do with the\n  relationship between the user and the streamer. Namely, whether the user is\n  following the streamer, whether they're subscribed to the streamer, and\n  whether they're banned from the streamer's chat.\n</p>\n<p>\n  One way to handle the follow and subscription states would be to fetch the\n  user's profile info, which could contain all of their followed and subscribed\n  streamers. This would be used with the streamer's name from\n  <i>GetChannelInfo</i> to display the correct states (buttons) on the UI. The\n  only problem is that a user could theoretically be following / subscribed to\n  thousands of streamers, so we would maybe want to paginate the lists of\n  followed and subscribed streamers, which would complicate things.\n</p>\n<p>\n  To make things simpler, and since we also have to handle the banned state, we\n  can rely on a <i>GetRelationshipToChannel</i> endpoint, which will return the\n  relevant entity, <i>RelationshipToChannel</i>, to be used to display the\n  correct states on the page.\n</p>\n<b>RelationshipToChannel</b>\n<ul>\n  <li>isBanned: <i>boolean</i></li>\n  <li>isFollowing: <i>boolean</i></li>\n  <li>subscription: <i>Subscription | null</i></li>\n</ul>\n<pre>\nGetRelationshipToChannel(channelId: string)\n  => RelationshipToChannel\n</pre>\n<p>\n  If the user is banned, we'll prevent them from sending chat messages (and\n  calling the <i>SendMessage</i> endpoint) altogether.\n</p>"
+        }
+    ],
+    "hints": [
+        {
+            "question": "I'm going to list the different features on a streamer's channel page to confirm that I'm not missing any important functionality. A user can watch the actual video of the livestream (and pause / unpause it), they can see the stream's chat in real time, they can send messages in the chat, they can see the streamer's channel info (description text, follower count, etc.), they can follow and unfollow the streamer, they can subscribe to and unsubscribe from the streamer (they have to pay to subscribe), they can see the current number of concurrent viewers on the stream, and they can see other recommended channels that they follow on the left navbar. Does that cover everything?",
+            "answer": "Yes, but you can ignore the recommended channels on the left navbar. Let's focus purely on the functionality that's relevant to the livestream on the page."
+        },
+        {
+            "question": "For subscriptions, as far as I know, a user subscribes on a monthly basis for a flat monthly fee. Is this correct?",
+            "answer": "There might be different tiers of subscriptions, but you can capture that in some SubscriptionInfo entity that you don't need to explicitly define."
+        },
+        {
+            "question": "A lot of the information on the page is very dynamic and warrants getting updated frequently and automatically, like follower count, concurrent viewer count, and obviously chat messages and the livestream itself. I'm assuming that we should design the various API endpoints with this in mind; does that sound good?",
+            "answer": "Let's make sure that the actual video and chat are updated in real time, as you would expect. Then, let's try to have the number of concurrent viewers be updated every so often (say, every 30 seconds); we don't want that number to be constantly changing, because that could be jarring, especially if the streamer has thousands of viewers tuning in and out of the stream. As for the follower count, we can let that be updated on page refresh."
+        },
+        {
+            "question": "To clarify, for following and subscribing, we do want to show the current user's follow / subscription status to the streamer, and we want to immediately reflect changes to it on the UI when the user clicks on the relevant \"Follow\" / \"Subscribe\" buttons, right?",
+            "answer": "Yes, absolutely. If a user isn't following a streamer, they should see that state reflected on the page, and if they press the \"Follow\" button, they should see the updated state immediately. The same goes for subscribing. What we don't care about is updating the total follower count in real time; that's what can be done on page refresh."
+        },
+        {
+            "question": "Regarding the chat, I know that users can send custom Twitch emotes as well as Cheermotes, which are special animated emotes that are purchased with Bits, Twitch's virtual currency. Should we handle these different kinds of emotes in our messaging API? What about other chat-related functionality, like being banned from the chat and the presence of chat moderators?",
+            "answer": "You should handle basic Twitch emotes that are available to all Twitch users, but you can disregard custom emotes that are only available to subscribers as well as Cheermotes. In fact, you can disregard the concept of Bits altogether for this design. You can also disregard chat moderators, but you should cover the banning feature. Specifically, if a user is banned from the chat, they can't send messages, but they need to somehow be alerted about this in the chat box; they shouldn't be allowed to even try sending messages."
+        },
+        {
+            "question": "Regarding the actual video, I'm not very familiar with how videos\u2014especially live videos\u2014work on the web at scale, but is it fair to assume that the Twitch backend will be able to continuously provide some VideoInfo entity that will contain the data needed to display the video on the UI?",
+            "answer": "Yes, for the sake of this design, that's totally fine. Don't worry about the underlying complexity of displaying live video, like the shape of the data and how to display it exactly."
+        }
+    ]
+}

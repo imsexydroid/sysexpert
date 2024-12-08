@@ -1,0 +1,86 @@
+{
+    "uid": "design-slack",
+    "name": "Design Slack",
+    "acl": {
+        "isFree": false,
+        "isFreeForStudents": false,
+        "productRequired": [
+            "systemsexpert"
+        ],
+        "isAvailable": true
+    },
+    "releaseDate": "2020-09-16T12:00:00-04:00",
+    "isReleased": true,
+    "video": {
+        "vimeoId": "454259139",
+        "duration": 0,
+        "annotations": [],
+        "instructor": "",
+        "style": "interview"
+    },
+    "prompt": "",
+    "walkthrough": [
+        {
+            "title": "Gathering System Requirements",
+            "content": "<p>\n  As with any systems design interview question, the first thing that we want to\n  do is to gather system requirements; we need to figure out what system we're\n  building exactly.\n</p>\n<p>\n  We're designing the core communication system behind Slack, which allows users\n  to send instant messages in Slack channels.\n</p>\n<p>Specifically, we'll want to support:</p>\n<ul>\n  <li>\n    Loading the most recent messages in a Slack channel when a user clicks on\n    the channel.\n  </li>\n  <li>\n    Immediately seeing which channels have unread messages for a particular user\n    when that user loads Slack.\n  </li>\n  <li>\n    Immediately seeing which channels have unread mentions of a particular user,\n    for that particular user, when that user loads Slack, and more specifically,\n    the number of these unread mentions in each relevant channel.\n  </li>\n  <li>Sending and receiving Slack messages instantly, in real time.</li>\n  <li>\n    Cross-device synchronization: if a user has both the Slack desktop app and\n    the Slack mobile app open, with an unread channel in both, and if they read\n    this channel on one device, the second device should immediately be updated\n    and no longer display the channel as unread.\n  </li>\n</ul>\n<p>\n  The system should have low latencies and high availability, catering to a\n  single region of roughly 20 million users. The largest Slack organizations\n  will have as many as 50,000 users, with channels of the same size within them.\n</p>\n<p>\n  That being said, for the purpose of this design, we should primarily focus on\n  latency and core functionality; availability and regionality can be\n  disregarded, within reason.\n</p>"
+        },
+        {
+            "title": "Coming Up With A Plan",
+            "content": "<p>We'll tackle this system by dividing it into two main sections:</p>\n<ul>\n  <li>Handling what happens when a Slack app loads.</li>\n  <li>Handling real-time messaging as well as cross-device synchronization.</li>\n</ul>\n<p>We can further divide the first section as follows:</p>\n<ul>\n  <li>Seeing all of the channels that a user is a part of.</li>\n  <li>Seeing messages in a particular channel.</li>\n  <li>Seeing which channels have unread messages.</li>\n  <li>Seeing which channels have unread mentions and how many they have.</li>\n</ul>"
+        },
+        {
+            "title": "Persistent Storage Solution & App Load",
+            "content": "<p>\n  While a large component of our design involves real-time communication,\n  another large part of it involves retrieving data (channels, messages, etc.)\n  at any given time when the Slack app loads. To support this, we'll need a\n  persistent storage solution.\n</p>\n<p>\n  Specifically, we'll opt for a SQL database since we can expect this data to be\n  structured and to be queried frequently.\n</p>\n<p>We can start with a simple table that'll store every Slack channel.</p>\n<p><b>Channels</b></p>\n<table>\n  <thead>\n    <tr>\n      <th>id (channelId): <i>uuid</i></th>\n      <th>orgId: <i>uuid</i></th>\n      <th>name: <i>string</i></th>\n      <th>description: <i>string</i></th>\n    </tr>\n  </thead>\n  <tbody>\n    <tr>\n      <td>...</td>\n      <td>...</td>\n      <td>...</td>\n      <td>...</td>\n    </tr>\n  </tbody>\n</table>\n\n<p>\n  Then, we can have another simple table representing channel-member pairs: each\n  row in this table will correspond to a particular user who is in a particular\n  channel. We'll use this table, along with the one above, to fetch a user's\n  relevant when the app loads.\n</p>\n<p><b>Channel Members</b></p>\n<table>\n  <thead>\n    <tr>\n      <th>id: <i>uuid</i></th>\n      <th>orgId: <i>uuid</i></th>\n      <th>channelId: <i>uuid</i></th>\n      <th>userId: <i>uuid</i></th>\n    </tr>\n  </thead>\n  <tbody>\n    <tr>\n      <td>...</td>\n      <td>...</td>\n      <td>...</td>\n      <td>...</td>\n    </tr>\n  </tbody>\n</table>\n\n<p>\n  We'll naturally need a table to store all historical messages sent on Slack.\n  This will be our largest table, and it'll be queried every time a user fetches\n  messages in a particular channel. The API endpoint that'll interact with this\n  table will return a paginated response, since we'll typically only want the 50\n  or 100 most recent messages per channel.\n</p>\n<p>\n  Also, this table will only be queried when a user clicks on a channel; we\n  don't want to fetch messages for all of a user's channels on app load, since\n  users will likely never look at most of their channels.\n</p>\n<p><b>Historical Messages</b></p>\n<table>\n  <thead>\n    <tr>\n      <th>id: <i>uuid</i></th>\n      <th>orgId: <i>uuid</i></th>\n      <th>channelId: <i>uuid</i></th>\n      <th>senderId: <i>uuid</i></th>\n      <th>sentAt: <i>timestamp</i></th>\n      <th>body: <i>string</i></th>\n      <th>mentions: <i>List&lt;uuid&gt;</i></th>\n    </tr>\n  </thead>\n  <tbody>\n    <tr>\n      <td>...</td>\n      <td>...</td>\n      <td>...</td>\n      <td>...</td>\n      <td>...</td>\n      <td>...</td>\n      <td>...</td>\n    </tr>\n  </tbody>\n</table>\n\n<p>\n  In order not to fetch recent messages for every channel on app load, all the\n  while supporting the feature of showing which channels have unread messages,\n  we'll need to store two extra tables: one for the latest activity in each\n  channel (this table will be updated whenever a user sends a message in a\n  channel), and one for the last time a particular user has read a channel (this\n  table will be updated whenever a user opens a channel).\n</p>\n<p><b>Latest Channel Timestamps</b></p>\n<table>\n  <thead>\n    <tr>\n      <th>id: <i>uuid</i></th>\n      <th>orgId: <i>uuid</i></th>\n      <th>channelId: <i>uuid</i></th>\n      <th>lastActive: <i>timestamp</i></th>\n    </tr>\n  </thead>\n  <tbody>\n    <tr>\n      <td>...</td>\n      <td>...</td>\n      <td>...</td>\n      <td>...</td>\n    </tr>\n  </tbody>\n</table>\n\n<p><b>Channel Read Receipts</b></p>\n<table>\n  <thead>\n    <tr>\n      <th>id: <i>uuid</i></th>\n      <th>orgId: <i>uuid</i></th>\n      <th>channelId: <i>uuid</i></th>\n      <th>userId: <i>uuid</i></th>\n      <th>lastSeen: <i>timestamp</i></th>\n    </tr>\n  </thead>\n  <tbody>\n    <tr>\n      <td>...</td>\n      <td>...</td>\n      <td>...</td>\n      <td>...</td>\n      <td>...</td>\n    </tr>\n  </tbody>\n</table>\n\n<p>\n  For the number of unread user mentions that we want to display next to channel\n  names, we'll have another table similar to the read-receipts one, except this\n  one will have a count of unread user mentions instead of a timestamp. This\n  count will be updated (incremented) whenever a user tags another user in a\n  channel message, and it'll also be updated (reset to 0) whenever a user opens\n  a channel with unread mentions of themself.\n</p>\n<p><b>Unread Channel-User-Mention Counts</b></p>\n<table>\n  <thead>\n    <tr>\n      <th>id: <i>uuid</i></th>\n      <th>orgId: <i>uuid</i></th>\n      <th>channelId: <i>uuid</i></th>\n      <th>userId: <i>uuid</i></th>\n      <th>count: <i>int</i></th>\n    </tr>\n  </thead>\n  <tbody>\n    <tr>\n      <td>...</td>\n      <td>...</td>\n      <td>...</td>\n      <td>...</td>\n      <td>...</td>\n    </tr>\n  </tbody>\n</table>\n<p></p>"
+        },
+        {
+            "title": "Load Balancing",
+            "content": "<p>\n  For all of the API calls that clients will issue on app load, including writes\n  to our database (when sending a message or marking a channel as read), we're\n  going to want to load balance.\n</p>\n<p>\n  We can have a simple round-robin load balancer, forwarding requests to a set\n  of server clusters that will then handle passing requests to our database.\n</p>"
+        },
+        {
+            "title": "\"Smart\" Sharding",
+            "content": "<p>\n  Since our tables will be very large, especially the messages table, we'll need\n  to have some sharding in place.\n</p>\n<p>\n  The natural approach is to shard based on organization size: we can have the\n  biggest organizations (with the biggest channels) in their individual shards,\n  and we can have smaller organizations grouped together in other shards.\n</p>\n<p>\n  An important point to note here is that, over time, organization sizes and\n  Slack activity within organizations will change. Some organizations might\n  double in size overnight, others might experience seemingly random surges of\n  activity, etc.. This means that, despite our relatively sound sharding\n  strategy, we might still run into hot spots, which is very bad considering the\n  fact that we care about latency so much.\n</p>\n<p>\n  To handle this, we can add a \"smart\" sharding solution: a subsystem of our\n  system that'll asynchronously measure organization activity and \"rebalance\"\n  shards accordingly. This service can be a strongly consistent key-value store\n  like Etcd or ZooKeeper, mapping orgIds to shards. Our API servers will\n  communicate with this service to know which shard to route requests to.\n</p>"
+        },
+        {
+            "title": "Pub/Sub System for Real-Time Behavior",
+            "content": "<p>There are two types of real-time behavior that we want to support:</p>\n<ul>\n  <li>Sending and receiving messages in real time.</li>\n  <li>\n    Cross-device synchronization (instantly marking a channel as read if you\n    have Slack open on two devices and read the channel on one of them).\n  </li>\n</ul>\n<p>\n  For both of these functionalities, we can rely on a Pub/Sub messaging system,\n  which itself will rely on our previously described \"smart\" sharding strategy.\n</p>\n<p>\n  Every Slack organization or group of organizations will be assigned to a Kafka\n  topic, and whenever a user sends a message in a channel or marks a channel as\n  read, our previously mentioned API servers, which handle speaking to our\n  database, will also send a Pub/Sub message to the appropriate Kafka topic.\n</p>\n<p>The Pub/Sub messages will look like:</p>\n<pre>\n{\n  \"type\": \"chat\",\n  \"orgId\": \"AAA\",\n  \"channelId\": \"BBB\",\n  \"userId\": \"CCC\",\n  \"messageId\": \"DDD\",\n  \"timestamp\": \"2020-08-31T01:17:02\",\n  \"body\": \"this is a message\",\n  \"mentions\": [\"CCC\", \"EEE\"]\n},\n{\n  \"type\": \"read-receipt\",\n  \"orgId\": \"AAA\",\n  \"channelId\": \"BBB\",\n  \"userId\": \"CCC\",\n  \"timestamp\": \"2020-08-31T01:17:02\"\n}\n</pre>\n<p>\n  We'll then have a different set of API servers who subscribe to the various\n  Kakfa topics (probably one API server cluster per topic), and our clients\n  (Slack users) will establish long-lived TCP connections with these API server\n  clusters to receive Pub/Sub messages in real time.\n</p>\n<p>\n  We'll want a load balancer in between the clients and these API servers, which\n  will also use the \"smart\" sharding strategy to match clients with the\n  appropriate API servers, which will be listening to the appropriate Kafka\n  topics.\n</p>\n<p>\n  When clients receive Pub/Sub messages, they'll handle them accordingly (mark a\n  channel as unread, for example), and if the clients refresh their browser or\n  their mobile app, they'll go through the entire \"on app load\" system that we\n  described earlier.\n</p>\n<p>\n  Since each Pub/Sub message comes with a timestamp, and since reading a channel\n  and sending Slack messages involve writing to our persistent storage, the\n  Pub/Sub messages will effectively be idempotent operations.\n</p>"
+        },
+        {
+            "title": "System Diagram",
+            "content": "<img\n  width=\"100%\"\n  src=\"https://assets.algoexpert.io/course-assets/systemsexpert/slack-system-diagram.svg\"\n  alt=\"Final Systems Architecture\"\n/>"
+        }
+    ],
+    "hints": [
+        {
+            "question": "There are a lot of things that you can do on Slack. Primarily, you use Slack to communicate with people in one-on-one channels, private channels, or public channels, all within an organization. But you can also do a bunch of other things on Slack, like create and delete channels, change channel settings, change Slack settings, invite people to channels, etc.. What exactly are we designing here?",
+            "answer": "We're designing the core messaging functionality, which involves communicating in both one-on-one channels and group channels in an organization. You don't have to worry about channel settings and all of those extra functionalities."
+        },
+        {
+            "question": "Okay. Do you want me to take care of the concept of private channels at all?",
+            "answer": "Let's just focus on users in a channel as far as access control is concerned; we can forget about the concept of a private channel."
+        },
+        {
+            "question": "Okay. And regarding communication, from my knowledge of Slack, when you load the web app or the desktop / mobile apps, you can obviously access all the messages of channels that you're in (including one-on-one channels), but you're also notified of channels that have unread messages for you and of the number of unread mentions that you have in each channel. Channels with unread messages are bold, if I remember correctly, and the number of unread mentions is simply visible next to channel names. Should we design our system to accommodate this?",
+            "answer": "Yes, we should take care of this. And on that note, one thing we'll want to handle is cross-device synchronization. In other words, if you have both the Slack desktop app and the Slack mobile app open, and both apps are showing that one channel is unread, and you read that channel on one of the apps, the other app should immediately get updated and should mark the channel as read. You'll have to handle this."
+        },
+        {
+            "question": "Hmm, okay. Speaking of different applications, by the way, are we designing the various device / software apps, or just the backend systems that the frontends / clients communicate with?",
+            "answer": "You'll only really focus on the backend systems for this question."
+        },
+        {
+            "question": "Okay. Also, there are a lot of different features in actual Slack messages. For example, adding custom emojis, pinning messages, saving messages, writing code snippets or text-blocks, etc.. Do you want me to handle all of this?",
+            "answer": "No, you can just treat messages as pure text for now. Of course, what you'll design will likely be extensible to different types of messages and will eventually be able to handle things like pinning or saving messages, but for this design, don't worry about that."
+        },
+        {
+            "question": "How many users do we expect to be building this for? And how large is the largest organization on slack? How many users does it have?",
+            "answer": "Slack has about 10 to 20 million users, so let's go with 20 million. And as for organizations, let's say that the largest single Slack customer has 50,000 people in the same organization. We can also approximate that the largest channel will be of that same size if all of an organization's employees are in the same channel (the typical #general channel, for example)."
+        },
+        {
+            "question": "Since this is a chat application, I'm assuming that low latency is one of our top priorities, and also, since this service impacts millions of users, I'm assuming that we should design with high availability in mind. Are these correct assumptions?",
+            "answer": "Yes to both of those things, but for the sake of being a little more focused, don't worry about optimizing for availability. Let's focus primarily on latency and core functionality."
+        },
+        {
+            "question": "Okay. And are we building this for a global audience, or should we focus on a single region?",
+            "answer": "Let's handle a single region for this question, but just like with availability, don't focus too much on this aspect of the design."
+        }
+    ]
+}

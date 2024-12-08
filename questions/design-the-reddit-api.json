@@ -1,0 +1,70 @@
+{
+    "uid": "design-the-reddit-api",
+    "name": "Design The Reddit API",
+    "acl": {
+        "isFree": false,
+        "isFreeForStudents": false,
+        "productRequired": [
+            "systemsexpert"
+        ],
+        "isAvailable": true
+    },
+    "releaseDate": "2020-02-27T12:00:00-05:00",
+    "isReleased": true,
+    "video": {
+        "vimeoId": "394019091",
+        "duration": 0,
+        "annotations": [],
+        "instructor": "",
+        "style": "interview"
+    },
+    "prompt": "<p>Design an API for Reddit subreddits given the following information.</p>\n\n<p>The API includes these 2 entities:</p>\n<ul>\n  <li><b>User</b> | <i>userId: string</i>, ...</li>\n  <li><b>SubReddit</b> | <i>subredditId: string</i>, ...</li>\n</ul>\n<p>\n  Both of these entities likely have other fields, but for the purpose of this\n  question, those other fields aren't needed.\n</p>\n<p>Your API should support the basic functionality of a subreddit on Reddit.</p>\n",
+    "walkthrough": [
+        {
+            "title": "Gathering Requirements",
+            "content": "<p>\n  As with any API design interview question, the first thing that we want to do\n  is to gather API requirements; we need to figure out what API we're building\n  exactly.\n</p>\n\n<p>\n  We're designing the core user flow of the <b>subreddit</b> functionality on\n  Reddit. Users can write posts on subreddits, they can comment on posts, and\n  they can upvote / downvote posts and comments.\n</p>\n\n<p>\n  We're going to be defining three primary entities: <i>Posts</i>,\n  <i>Comments</i>, and <i>Votes</i>, as well as their respective CRUD operations.\n</p>\n\n<p>\n  We're also going to be designing an API for buying and giving awards on\n  Reddit.\n</p>"
+        },
+        {
+            "title": "Coming Up With A Plan",
+            "content": "<p>\n  It's important to organize ourselves and to lay out a clear plan regarding how\n  we're going to tackle our design. What are the major, potentially contentious\n  parts of our API? Why are we making certain design decisions?\n</p>\n<p>\n  The first major point of contention is whether to store votes only on Comments\n  and Posts, and to cast votes by calling the <i>EditComment</i> and\n  <i>EditPost</i> methods, or whether to store them as entirely separate\n  entities--siblings of Posts and Comments, so to speak. Storing them as\n  separate entities makes it much more straightforward to edit or remove a\n  particular user's votes (by just calling <i>EditVote</i>, for instance), so\n  we'll go with this approach.\n</p>\n<p>\n  We can then plan to tackle Posts, Comments, and Votes in this order, since\n  they'll likely share some common structure.\n</p>"
+        },
+        {
+            "title": "Posts",
+            "content": "<p>\n  Posts will have an id, the id of their creator (i.e., the user who writes\n  them), the id of the subreddit that they're on, a description and a title, and\n  a timestamp of when they're created.\n</p>\n<p>\n  Posts will also have a count of their votes, comments, and awards, to be\n  displayed on the UI. We can imagine that some backend service will be\n  calculating or updating these numbers when some of the Comment, Vote, and\n  Award CRUD operations are performed.\n</p>\n<p>\n  Lastly, Posts will have optional <b>deletedAt</b> and\n  <b>currentVote</b> fields. Subreddits display posts that have been removed\n  with a special message; we can use the <b>deletedAt</b> field to accomplish\n  this. The <b>currentVote</b> field will be used to display to a user whether\n  or not they've cast a vote on a post. This field will likely be populated\n  by the backend upon fetching Posts or when casting Votes.\n</p>\n<ul>\n  <li>postId: <i>string</i></li>\n  <li>creatorId: <i>string</i></li>\n  <li>subredditId: <i>string</i></li>\n  <li>title: <i>string</i></li>\n  <li>description: <i>string</i></li>\n  <li>createdAt: <i>timestamp</i></li>\n  <li>votesCount: <i>int</i></li>\n  <li>commentsCount: <i>int</i></li>\n  <li>awardsCount: <i>int</i></li>\n  <li>deletedAt?: <i>timestamp</i></li>\n  <li>currentVote?: <i>enum UP/DOWN</i></li>\n</ul>\n<p>\n  Our <i>CreatePost</i>, <i>EditPost</i>, <i>GetPost</i>, and\n  <i>DeletePost</i> methods will be very straightforward. One thing to note, however, is\n  that all of these operations will take in the <b>userId</b> of the user\n  performing them; this id, which will likely contain authentication\n  information, will be used for ACL checks to see if the user performing the\n  operations has the necessary permission(s) to do so.\n</p>\n<pre>\nCreatePost(userId: string, subredditId: string, title: string, description: string)\n  => Post\n\nEditPost(userId: string, postId: string, title: string, description: string)\n  => Post\n\nGetPost(userId: string, postId: string)\n  => Post\n\nDeletePost(userId: string, postId: string)\n  => Post\n</pre>\n<p>\n  Since we can expect to have hundreds, if not thousands, of posts on a given\n  subreddit, our <i>ListPosts</i> method will have to be paginated. The method\n  will take in optional <b>pageSize</b> and <b>pageToken</b> parameters and will\n  return a list of posts of at most length <b>pageSize</b> as well as a\n  <b>nextPageToken</b>--the token to be fed to the method to retrieve the next\n  page of posts.\n</p>\n<pre>\nListPosts(userId: string, subredditId: string, pageSize?: int, pageToken?: string)\n  => (Post[], nextPageToken?)\n</pre>"
+        },
+        {
+            "title": "Comments",
+            "content": "<p>\n  Comments will be similar to Posts. They'll have an id, the id of their\n  creator (i.e., the user who writes them), the id of the post that they're on,\n  a content string, and the same other fields as Posts have. The only difference\n  is that Comments will also have an optional <b>parentId</b> pointing to the\n  parent post or parent comment of the comment. This id will allow the Reddit UI\n  to reconstruct Comment trees to properly display (indent) replies. The UI can\n  also sort comments within a reply thread by their <b>createdAt</b> timestamps\n  or by their <b>votesCount</b>.\n</p>\n<ul>\n  <li>commentId: <i>string</i></li>\n  <li>creatorId: <i>string</i></li>\n  <li>postId: <i>string</i></li>\n  <li>createdAt: <i>timestamp</i></li>\n  <li>content: <i>string</i></li>\n  <li>votesCount: <i>int</i></li>\n  <li>awardsCount: <i>int</i></li>\n  <li>parentId?: <i>string</i></li>\n  <li>deletedAt?: <i>timestamp</i></li>\n  <li>currentVote?: <i>enum UP/DOWN</i></li>\n</ul>\n<p>\n  Our CRUD operations for Comments will be very similar to those for Posts,\n  except that the <i>CreateComment</i> method will also take in an optional\n  <b>parentId</b> pointing to the comment that it's replying to, if relevant.\n</p>\n<pre>\nCreateComment(userId: string, postId: string, content: string, parentId?: string)\n  => Comment\n\nEditComment(userId: string, commentId: string, content: string)\n  => Comment\n\nGetComment(userId: string, commentId: string)\n  => Comment\n\nDeleteComment(userId: string, commentId: string)\n  => Comment\n\nListComments(userId: string, postId: string, pageSize?: int, pageToken?: string)\n  => (Comment[], nextPageToken?)\n</pre>"
+        },
+        {
+            "title": "Votes",
+            "content": "<p>\n  Votes will have an id, the id of their creator (i.e., user who casts them),\n  the id of their target (i.e., the post or comment that they're on), and a\n  type, which will be a simple UP/DOWN enum. They could also have a\n  <b>createdAt</b> timestamp for good measure.\n</p>\n<ul>\n  <li>voteId: <i>string</i></li>\n  <li>creatorId: <i>string</i></li>\n  <li>targetId: <i>string</i></li>\n  <li>type: <i>enum UP/DOWN</i></li>\n  <li>createdAt: <i>timestamp</i></li>\n</ul>\n<p>\n  Since it doesn't seem like getting a single vote or listing votes would be\n  very useful for our feature, we'll skip designing those endpoints (though they\n  would be straightforward).\n</p>\n<p>\n  Our <i>CreateVote</i>, <i>EditVote</i>, and <i>DeleteVote</i> methods will be\n  simple and useful. The <i>CreateVote</i> method will be used when a user casts\n  a new vote on a post or comment; the <i>EditVote</i> method will be used when\n  a user has already cast a vote on a post or comment and casts the opposite\n  vote on that same post or comment; and the <i>DeleteVote</i> method will be\n  used when a user has already cast a vote on a post or comment and just removes\n  that same vote.\n</p>\n<pre>\nCreateVote(userId: string, targetId: string, type: enum UP/DOWN)\n  => Vote\n\nEditVote(userId: string, voteId: string, type: enum UP/DOWN)\n  => Vote\n\nDeleteVote(userId: string, voteId: string)\n  => Vote\n</pre>"
+        },
+        {
+            "title": "Awards",
+            "content": "<p>\n  We can define two simple endpoints to handle buying and giving awards. The\n  endpoint to buy awards will take in a <b>paymentToken</b>, which will be a\n  string that contains all of the necessary information to process a payment. The endpoint to give an award will take in a <b>targetId</b>, which will be the id of the post or comment that the award is being given to.\n</p>\n<pre>\nBuyAwards(userId: string, paymentToken: string, quantity: int)\n\nGiveAward(userId: string, targetId: string)\n</pre>"
+        }
+    ],
+    "hints": [
+        {
+            "question": "To make sure that we're on the same page: a subreddit is an online community where users can write posts, comment on posts, upvote / downvote posts, share posts, report posts, become moderators, etc..--is this correct, and are we designing all of this functionality?",
+            "answer": "Yes, that's correct, but let's keep things simple and focus only on writing posts, writing comments, and upvoting / downvoting. You can forget about all of the auxiliary features like sharing, reporting, moderating, etc.."
+        },
+        {
+            "question": "So we're really focusing on the very narrow but core aspect of a subreddit: writing posts, commenting on them, and voting on them.",
+            "answer": "Yes."
+        },
+        {
+            "question": "I'm thinking of defining the schemas for the main entities that live within a subreddit and then defining their CRUD operations -- methods like Create/Get/Edit/Delete/List<Entity> -- is this in line with what you're asking me to do?",
+            "answer": "Yes, and make sure to include method signatures -- what each method takes in and what each method returns. Also include the types of each argument."
+        },
+        {
+            "question": "The entities that I've identified are Posts, Comments, and Votes (upvotes and downvotes). Does this seem accurate?",
+            "answer": "Yes. These are the 3 core entities that you should be defining and whose APIs you're designing."
+        },
+        {
+            "question": "Is there any other functionality of a subreddit that we should design?",
+            "answer": "Yes, you should also allow people to award posts. Awards are a special currency that can be bought for real money and gifted to comments and posts. Users can buy some quantity of awards in exchange for real money, and they can give awards to posts and comments (one award per post / comment)."
+        }
+    ]
+}

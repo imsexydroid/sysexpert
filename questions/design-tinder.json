@@ -1,0 +1,90 @@
+{
+    "uid": "design-tinder",
+    "name": "Design Tinder",
+    "acl": {
+        "isFree": false,
+        "isFreeForStudents": false,
+        "productRequired": [
+            "systemsexpert"
+        ],
+        "isAvailable": true
+    },
+    "releaseDate": "2021-08-26T12:00:00-04:00",
+    "isReleased": true,
+    "video": {
+        "vimeoId": "591923408",
+        "duration": 0,
+        "annotations": [],
+        "instructor": "",
+        "style": "tutorial"
+    },
+    "prompt": "",
+    "walkthrough": [
+        {
+            "title": "Gathering System Requirements",
+            "content": "<p>\n  As with any systems design interview question, the first thing that we want to\n  do is to gather system requirements; we need to figure out what system we're\n  building exactly.\n</p>\n<p>\n  We're designing the core system behind Tinder, which allows users to create a\n  profile and swipe through a seemingly endless deck of potential matches. Users\n  can also super-like potential matches, putting themselves at the top of the\n  other users' decks, and they can undo their most recent swipe if it was a left\n  swipe. Users don't have any limitations on the number of swipes, Super Likes,\n  and Undos that they can do per day.\n</p>\n<p>\n  We're explicitly not designing any functionality that's available after two\n  users match, including any kind of notification system to alert users that\n  they've gotten a match, unless the match occurs directly when they swipe right\n  on a potential match.\n</p>\n<p>\n  Our system should serve a global userbase of about 50 million users who are\n  evenly distributed across the world, and we'd like to have mostly instant\n  swipes, allowing for some latency when the Tinder app first loads up and after\n  a user has swiped through a good number of potential matches.\n</p>\n<p>\n  We're told not to focus on the availability of our system, which should help\n  us narrow down our design a little bit.\n</p>"
+        },
+        {
+            "title": "Coming Up With A Plan",
+            "content": "<p>We'll tackle this system by dividing it into four main sections:</p>\n<ul>\n  <li>Storage Overview</li>\n  <li>Profile Creation</li>\n  <li>Deck Generation</li>\n  <li>Swiping</li>\n</ul>\n<p>\n  We'll cover super-liking and undoing at the end, which will likely involve\n  making tweaks to our design for swiping.\n</p>"
+        },
+        {
+            "title": "Storage Overview",
+            "content": "<p>\n  Most of the data that we expect to store (profiles, decks, swipes, and\n  matches), makes sense to be structured, so we'll use a SQL storage solution\n  for it, and it'll be served directly from relevant SQL tables.\n</p>\n<p>\n  All of this data will be stored in regional databases, located based on user\n  hot spots (e.g., a database on the east coast of the U.S., one in central\n  U.S., one in western Europe, one in India, etc.), and users fetching Tinder\n  data will be automatically routed to the closest regional database after being\n  routed to intermediary API servers via some round-robin load balancing.\n</p>\n<p>\n  The only exception is users' profile pictures, which we'll store in a global\n  blob store and which will be served via CDN.\n</p>\n<p>\n  We'll have some asynchronous replication between the regional databases, which\n  should take anywhere from a few minutes to a few hours to occur. The\n  asynchronicity of the replication should be fine, because the people that\n  users interact with will usually, by the nature of the app, be close to them\n  and therefore be using the same regional database as them.\n</p>"
+        },
+        {
+            "title": "Profile Creation",
+            "content": "<p>\n  We'll store Tinder profiles in an individual SQL table, where each row will\n  represent a profile:\n</p>\n<ul>\n  <li>userId: <i>string</i>, the unique id of the user</li>\n  <li>geolocation: <i>point</i></li>\n  <li>name: <i>string</i></li>\n  <li>age: <i>int</i></li>\n  <li>gender: <i>enum</i></li>\n  <li>sexualPreference: <i>enum</i></li>\n  <li>job: <i>string</i></li>\n  <li>bio: <i>string</i></li>\n  <li>pictures: <i>string[]</i>, a list of blob-store addresses</li>\n</ul>\n<p>\n  The <i>userId</i> field will be automatically assigned to the user, while most\n  of the other fields will be set by the user when creating or editing their\n  profile. The user's geolocation can be updated any time that the user opens\n  the Tinder app and is in a different location than the one stored in their\n  profile.\n</p>\n<p>\n  With 50 million users and an estimated upper bound of ~2KB per profile\n  (pictures excluded), we'll need 2KB * 50e6 = 100GB of storage per region, or\n  1-5TB in total, assuming 10-50 regional databases. This is very little storage\n  space.\n</p>\n<p>\n  As far as pictures are concerned, we can assume that users will have an\n  average of five pictures each, with an upper bound of ~2MB per picture\n  (high-quality, 1920x1080p). We'll almost certainly want to reduce the\n  dimensions of pictures, since they'll only be viewable on small mobile\n  screens, and we'll perform some lossy compression on them, because we can\n  afford to lose a bit of quality. We can assume that this will bring pictures\n  down to roughly ~50KB per picture (~200-500KB after dimension reduction and\n  ~50KB after lossy compression).\n</p>\n<pre>\n~50KB * 5 = 250KB of pictures per user\n~250KB * 50e6 users = 12.5TB (not a lot)  \n</pre>\n<p>Clearly, the pictures account for most of our storage needs.</p>"
+        },
+        {
+            "title": "Deck Generation",
+            "content": "<p>\n  For deck generation, we're going to have our smart deck-generation algorithm\n  continuously generate decks of 200 potential matches for each user every day.\n  This will ensure that user decks are as relevant as possible when users\n  interact with them. For example, if someone is traveling out of a location and\n  therefore no longer relevant to a particular user, they'll be removed from the\n  user's deck within a day, minimizing the chance for a user to see irrelevant\n  profiles.\n</p>\n<p>\n  The deck-generation algorithm can be smart enough not to re-generate decks for\n  users who are inactive for more than a day, and it can also be told to\n  re-generate decks for users who've just changed location (i.e., when a user\n  opens the Tinder app and is in a different location than the one stored in\n  their profile row, the app tells the deck-generation algorithm to re-generate\n  a deck for the user).\n</p>\n<p>\n  We'll store each user's deck of potential matches in an individual SQL table,\n  where each row will represent a deck:\n</p>\n<ul>\n  <li>userId: <i>string</i>, the id of the user that this deck belongs to</li>\n  <li>potentialMatches: <i>string[]</i>, a list of userIds</li>\n</ul>\n<p>\n  On app load, the Tinder app will request the 40 profiles at the top of their\n  deck, remove them from the top of their deck (i.e., by updating their deck's\n  row in the <u>decks</u> table), and locally store them. It's worth noting\n  that, had we not compressed the profile images at the time of profile\n  creation, each user would be requesting and attempting to store 400MB of data,\n  which would be way too much data. With our compression, where each picture is\n  ~50KB, 40 profiles becomes just 10MB of data, which is acceptable.\n</p>\n<p>\n  It's also worth noting that, if the user shuts their phone down or completely\n  closes the Tinder app process, any locally stored profiles that the user\n  hadn't swiped on will simply be readded to their deck at a later time by the\n  deck-generation algorithm, since they were presumably relevant profiles and\n  haven't yet been swiped on by the user.\n</p>\n<p>\n  The Tinder app will ensure that the number of locally cached profiles never\n  goes below 20, such that the user almost never feels like they've run out of\n  profiles to swipe on, even for a few seconds. To accomplish this, the user's\n  phone will eagerly fetch 20 additional profiles from the top of their deck\n  when the user has 20 locally stored profiles left.\n</p>\n<p>\n  When the user runs out of potential matches (i.e., their deck has gone from\n  200 to 0 potential matches), the request for 20 more profiles triggers a new\n  deck to be generated on demand. This is the only time that we might expect\n  some potential loading time in the middle of using the app, but this happens\n  infrequently, since the user would have to swipe on 200 potential matches\n  within a day and would have to be swiping right extremely fast to go through\n  their final 20 profiles before a new deck is generated.\n</p>"
+        },
+        {
+            "title": "Swiping",
+            "content": "<p>\n  For swiping, we'll have two more SQL tables: one for swipes and one for\n  matches. The SQL table for <u>swipes</u> will look like this:\n</p>\n<ul>\n  <li>swiperId: <i>string</i>, the id of the user that performed the swipe</li>\n  <li>swipeeId: <i>string</i>, the id of the user that was swiped on</li>\n  <li>swipeType: <i>enum</i> (<b>LIKE</b>, <b>PASS</b>)</li>\n  <li>timestamp: <i>datetime</i></li>\n</ul>\n<p>\n  This table will be indexed on <i>swipeeId</i> and <i>timestamp</i> in order to\n  allow for fast lookups of a user's recent swipes (all of the recent swipes\n  that were performed <b><i>on</i></b> the user).\n</p>\n<p>The SQL table for <u>matches</u> will look like this:</p>\n<ul>\n  <li>userOneId: <i>string</i>, the id of the first user in the match</li>\n  <li>userTwoId: <i>string</i>, the id of the second user in the match</li>\n  <li>timestamp: <i>datetime</i></li>\n</ul>\n<p>\n  This <u>matches</u> table will mainly be used for the part of the system that\n  is beyond the scope of this question.\n</p>\n<p>\n  On app load, the Tinder app will fetch all of the rows in the\n  <u>swipes</u> table where <i>swipeeId</i> matches the user's <i>userId</i>.\n  Then, every 30 seconds, it'll fetch the same rows, except only those with a\n  timestamp after the most recent previously-fetched swipe's timestamp.\n</p>\n<p>\n  The Tinder app will keep all of the swipes in memory, in a hashtable-like\n  structure, meaning that for any potential match, the app can know right away\n  if they've already swiped on the user. This data can easily fit in memory on a\n  phone (~20 bytes per swipe * maximum of 100k swipes = 2MB).\n</p>\n<p>\n  When a user swipes, the app will write the swipe to the <u>swipes</u> table.\n  If the swipe is a <b>LIKE</b>, the backend will check for a matching swipe,\n  and if there is one, it'll write a match to the <u>matches</u> table.\n</p>\n<p>\n  On the app's side, if there's a match (instantly knowable because of the local\n  cache of swipes), the app will display a notification to the user; this is\n  instant because we don't rely on the backend's response.\n</p>"
+        },
+        {
+            "title": "Super-Liking",
+            "content": "<p>\n  The Super Like feature can be implemented with the following tweaks to our\n  existing system:\n</p>\n<ol>\n  <li>\n    A new <b>SUPER-LIKE</b> value is added to the <i>swipeType</i> in the\n    <u>swipes</u> table.\n  </li>\n  <li>\n    When a user (<b>Foo</b>) super-likes a potential match (<b>Bar</b>), the\n    recorded swipe gets set to a <b>SUPER-LIKE</b>. If the backend notices a\n    match, nothing else happens, except for writing the match to the\n    <u>matches</u> table. Otherwise, the backend writes <b>Foo</b>'s <i>userId</i> to\n    <b>Bar</b>'s deck row in the <u>decks</u> table, putting <b>Foo</b> at the\n    top of <b>Bar</b>'s deck, behind other super-likes, because older\n    super-likes have precedence. If <b>Foo</b>'s <i>userId</i> was already in\n    <b>Bar</b>'s deck, it simply gets moved.\n  </li>\n</ol>\n<p>\n  Our deck-generation algorithm is smart enough to keep super-likes at the top\n  of decks, ordered by timestamp, such that older super-likes appear first.\n</p>\n<p>\n  As far as the Tinder UI is concerned, when the potential match at the top of a\n  user's deck has super-liked the user (instantly knowable because of the local\n  cache of swipes), a visual indicator is displayed. If a user gets super-liked\n  while on the app by a user whose profile hasn't yet been fetched (i.e., a user\n  who isn't in the 20-40 locally stored profiles), as soon as the app fetches\n  the next 20 profiles from their deck, they'll see the Super Like at the top.\n</p>"
+        },
+        {
+            "title": "Undoing",
+            "content": "<p>\n  The Undo feature can be implemented by simply delaying the API calls that\n  occur on a left swipe until the next swipe or until the Tinder app is closed.\n  This avoids doing multiple writes to the <u>swipes</u> table, which would\n  otherwise be required in order to undo a left swipe.\n</p>"
+        },
+        {
+            "title": "System Diagram",
+            "content": "<img\n  width=\"100%\"\n  src=\"https://assets.algoexpert.io/course-assets/systemsexpert/tinder-system-diagram.svg\"\n  alt=\"Final Systems Architecture\"\n/>"
+        }
+    ],
+    "hints": [
+        {
+            "question": "As far as I know, users who sign up on Tinder first create a profile (name, age, job, bio, sexual preference, etc.), after which they can start swiping on other users near them, who appear in a stacked deck of potential matches on the main page of the app. If two users swipe right on each other, they match, and they can now directly communicate with one another. Are we designing all of this?",
+            "answer": "Yes, but you don't have to design the messaging feature or any functionality that's available after two users match. You should also design both the Super Like feature and the Undo feature. Super Like allows a user to effectively arrive at the top of another user's deck, indicating that they super-liked them. Undo allows a user to unswipe the last user that they swiped on. So if they accidentally swiped left on someone, they can undo that. But this can only be done for the last user; you can't spam undo."
+        },
+        {
+            "question": "Regarding the Undo feature, can a user undo a match?",
+            "answer": "For the sake of this design, let's only allow undoing when you swipe left\u2014not when you swipe right. And if you swipe left, then swipe right, you can no longer undo the left swipe from two swipes ago."
+        },
+        {
+            "question": "Do users have a limited number of right swipes, Super Likes, and Undos per day? What about the number of potential matches in their deck? Is there a daily cap on that number, like 100 or 200 potential matches per day?",
+            "answer": "For the sake of this design, let's not have any caps whatsoever. In other words, users will be given an infinite amount of potential matches in their deck (within their distance parameters), and they can endlessly swipe right on them, Super Like them, and undo left swipes. Naturally, if a user were to swipe through every single potential match within their distance parameters, then they would run out of potential matches, but their deck would likely quickly get new potential matches as new users sign up on Tinder."
+        },
+        {
+            "question": "Regarding the deck of potential matches, here are some assumptions that I'm making; let me know if this sounds appropriate. Every user has an endless deck of potential matches that are within their distance parameters, as we just mentioned, and this deck should be ordered in some way (perhaps based on a matchability score). The deck should only consist of users who have either already liked this user or not yet swiped on them. For users who have already swiped left on the main user, we should probably, in a best-effort type of way, try to remove them from the main user's deck. And then, of course, users who have super-liked the main user should be at the top of the deck. Does this seem reasonable?",
+            "answer": "This seems reasonable, but you don't actually need to worry about how decks are generated. In other words, you can assume that we have a smart matching algorithm that generates the decks for you based on matchability scores, preferences, distance, etc., and you should just rely on this algorithm and figure out where it fits into your design. So you don't even need to worry about whether potential matches who've swiped left on a user show up in the user's deck; the matching algorithm will take care of that for you."
+        },
+        {
+            "question": "Are we designing the part of the system that notifies users when they have a new match?",
+            "answer": "You should think about how a user will be notified of a match if a match occurs in real time, as they swipe right on another user. Otherwise, don't worry about the match-notification system when the user is idle on the app or not using the app at all."
+        },
+        {
+            "question": "As far as scale is concerned, how many users are we designing Tinder for, and where in the world should we assume that they're located?",
+            "answer": "Let's assume that we have roughly 50 million users on Tinder. You can assume that they're evenly distributed across the globe, perhaps with hot spots in major urban areas."
+        },
+        {
+            "question": "As far as latency and reliability are concerned, I'm assuming that we want Tinder to be mostly highly available and that we want swipes to feel instant. Is it ok if there's a little bit of loading time when you first open the app or after you've swiped through, say, 200 profiles?",
+            "answer": "What you described for latency is great. As far as reliability is concerned, let's not worry too much about it for the sake of this design. You can assume that you have a highly available SQL setup out of the box, without worrying about the availability details."
+        }
+    ]
+}

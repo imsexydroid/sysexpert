@@ -1,0 +1,86 @@
+{
+    "uid": "design-google-drive",
+    "name": "Design Google Drive",
+    "acl": {
+        "isFree": false,
+        "isFreeForStudents": false,
+        "productRequired": [
+            "systemsexpert"
+        ],
+        "isAvailable": true
+    },
+    "releaseDate": "2020-02-24T12:00:00-05:00",
+    "isReleased": true,
+    "video": {
+        "vimeoId": "393365928",
+        "duration": 0,
+        "annotations": [],
+        "instructor": "",
+        "style": "interview"
+    },
+    "prompt": "",
+    "walkthrough": [
+        {
+            "title": "Gathering System Requirements",
+            "content": "<p>\n  As with any systems design interview question, the first thing that we want to\n  do is to gather system requirements; we need to figure out what system we're\n  building exactly.\n</p>\n\n<p>\n  We're designing the core user flow of the <b>Google Drive</b> web application.\n  This consists of storing two main entities: folders and files. More\n  specifically, the system should allow users to create folders, upload and\n  download files, and rename and move entities once they're stored. We don't\n  have to worry about ACLs, sharing entities, or any other auxiliary Google\n  Drive features.\n</p>\n\n<p>\n  We're going to be building this system at a very large scale, assuming 1\n  billion users, each with <b>15GB</b> of data stored in Google Drive on\n  average. This adds up to approximately <b>15,000 PB</b> of data in total,\n  without counting any metadata that we might store for each entity, like its\n  name or its type.\n</p>\n\n<p>\n  We need this service to be <b>Highly Available</b> and also very redundant. No\n  data that's successfully stored in Google Drive can ever be lost, even through\n  catastrophic failures in an entire region of the world.\n</p>"
+        },
+        {
+            "title": "Coming Up With A Plan",
+            "content": "<p>\n  It's important to organize ourselves and to lay out a clear plan regarding how\n  we're going to tackle our design. What are the major, distinguishable\n  components of our how system?\n</p>\n<p>\n  First of all, we'll need to support the following operations:\n</p>\n<ul>\n  <li>\n    For <b>Files</b>\n    <ul>\n      <li><i>UploadFile</i></li>\n      <li><i>DownloadFile</i></li>\n      <li><i>DeleteFile</i></li>\n      <li><i>RenameFile</i></li>\n      <li><i>MoveFile</i></li>\n    </ul>\n  </li>\n  <li>\n    For <b>Folders</b>\n    <ul>\n      <li><i>CreateFolder</i></li>\n      <li><i>GetFolder</i></li>\n      <li><i>DeleteFolder</i></li>\n      <li><i>RenameFolder</i></li>\n      <li><i>MoveFolder</i></li>\n    </ul>\n  </li>\n</ul>\n<p>\n  Secondly, we'll have to come up with a proper storage solution for two types\n  of data:\n</p>\n<ul>\n  <li>\n    File Contents: The contents of the files uploaded to Google Drive. These are\n    opaque bytes with no particular structure or format.\n  </li>\n  <li>\n    Entity Info: The metadata for each entity. This might include fields like\n    <b>entityID, ownerID, lastModified, entityName, entityType</b>. This list is\n    non-exhaustive, and we'll most likely add to it later on.\n  </li>\n</ul>\n<p>\n  Let's start by going over the storage solutions that we want to use, and then\n  we'll go through what happens when each of the operations outlined above is\n  performed.\n</p>"
+        },
+        {
+            "title": "Storing Entity Info",
+            "content": "<p>\n  To store entity information, we can use key-value stores. Since we need high\n  availability and data replication, we need to use something like Etcd,\n  Zookeeper, or Google Cloud Spanner (as a K-V store) that gives us both of\n  those guarantees as well as consistency (as opposed to DynamoDB, for instance,\n  which would give us only eventual consistency).\n</p>\n\n<p>\n  Since we're going to be dealing with many gigabytes of entity information\n  (given that we're serving a billion users), we'll need to shard this data\n  across multiple clusters of these K-V stores. Sharding on entityID means that\n  we'll lose the ability to perform batch operations, which these key-value\n  stores give us out of the box and which we'll need when we move entities\n  around (for instance, moving a file from one folder to another would involve\n  editing the metadata of 3 entities; if they were located in 3 different shards\n  that wouldn't be great). Instead, we can shard based on the <b>ownerID</b> of\n  the entity, which means that we can edit the metadata of multiple entities\n  atomically with a transaction, so long as the entities belong to the same\n  user.\n</p>\n\n<p>\n  Given the traffic that this website needs to serve, we can have a layer of\n  proxies for entity information, load balanced on a hash of the <b>ownerID</b>.\n  The proxies could have some caching, as well as perform <b>ACL</b> checks when\n  we eventually decide to support them. The proxies would live at the regional\n  level, whereas the source-of-truth key-value stores would be accessed\n  globally.\n</p>"
+        },
+        {
+            "title": "Storing File Data",
+            "content": "<p>\n  When dealing with potentially very large uploads and data storage, it's often\n  advantageous to split up data into blobs that can be pieced back together to\n  form the original data. When uploading a file, the request will be load balanced\n  across multiple servers that we'll call \"blob splitters\", and these blob\n  splitters will have the job of splitting files into blobs and storing these\n  blobs in some global blob-storage solution like\n  <b>GCS</b> or <b>S3</b> (since we're designing <b>Google</b> Drive, it might\n  not be a great idea to pick S3 over GCS :P).\n</p>\n\n<p>\n  One thing to keep in mind is that we need a lot of redundancy for the data\n  that we're uploading in order to prevent data loss. So we'll probably want to\n  adopt a strategy like: try pushing to 3 different GCS <b>buckets</b> and\n  consider a write successful only if it went through in at least 2 buckets.\n  This way we always have redundancy without necessarily sacrificing\n  availability. In the background, we can have an extra service in charge of\n  further replicating the data to other buckets in an async manner. For our main\n  3 buckets, we'll want to pick buckets in 3 different availability zones to\n  avoid having all of our redundant storage get wiped out by potential\n  catastrophic failures in the event of a natural disaster or huge power\n  outage.\n</p>\n\n<p>\n  In order to avoid having multiple identical blobs stored in our blob stores,\n  we'll name the blobs after a hash of their content. This technique is called\n  <b>Content-Addressable Storage</b>, and by using it, we essentially make all\n  blobs immutable in storage. When a file changes, we simply upload the entire\n  new resulting blobs under their new names computed by hashing their new\n  contents.\n</p>\n\n<p>\n  This immutability is <i>very</i> powerful, in part because it means that we\n  can very easily introduce a caching layer between the blob splitters and the\n  buckets, without worrying about keeping caches in sync with the main source of\n  truth when edits are made--an edit just means that we're dealing with a\n  completely different blob.\n</p>"
+        },
+        {
+            "title": "Entity Info Structure",
+            "content": "<p>\n  Since folders and files will both have common bits of metadata, we can have\n  them share the same structure. The difference will be that folders will have\n  an\n  <b>is_folder</b> flag set to true and a list of <b>children_ids</b>, which\n  will point to the entity information for the folders and files within the\n  folder in question. Files will have an <b>is_folder</b> flag set to false and\n  a <b>blobs</b> field, which will have the IDs of all of the blobs that make up\n  the data within the relevant file. Both entities can also have a\n  <b>parent_id</b> field, which will point to the entity information of the\n  entity's parent folder. This will help us quickly find parents when moving\n  files and folders.\n</p>\n<ul>\n  <li>File Info</li>\n  <pre>\n{\n  blobs: ['blob_content_hash_0', 'blob_content_hash_1'],\n  id: 'some_unique_entity_id'\n  is_folder: false,\n  name: 'some_file_name',\n  owner_id: 'id_of_owner',\n  parent_id: 'id_of_parent',\n}</pre>\n  <li>Folder Info</li>\n  <pre>\n{\n  children_ids: ['id_of_child_0', 'id_of_child_1'],\n  id: 'some_unique_entity_id'\n  is_folder: true,\n  name: 'some_folder_name',\n  owner_id: 'id_of_owner',\n  parent_id: 'id_of_parent',\n}</pre>\n</ul>"
+        },
+        {
+            "title": "Garbage Collection",
+            "content": "<p>\n  Any change to an existing file will create a whole new blob and de-reference\n  the old one. Furthermore, any deleted file will also de-reference the file's\n  blobs. This means that we'll eventually end up with a lot of\n  <b>orphaned</b> blobs that are basically unused and taking up storage for no\n  reason. We'll need a way to get rid of these blobs to free some space.\n</p>\n\n<p>\n  We can have a <b>Garbage Collection</b> service that watches the entity-info\n  K-V stores and keeps counts of the number of times every blob is referenced by\n  files; these counts can be stored in a SQL table.\n</p>\n\n<p>\n  Reference counts will get updated whenever files are uploaded and deleted.\n  When the reference count for a particular blob reaches 0, the Garbage\n  Collector can mark the blob in question as orphaned in the relevant blob\n  stores, and the blob will be safely deleted after some time if it hasn't been\n  accessed.\n</p>"
+        },
+        {
+            "title": "End To End API Flow",
+            "content": "<p>\n  Now that we've designed the entire system, we can walk through what happens\n  when a user performs any of the operations we listed above.\n</p>\n\n<p>\n  <i>CreateFolder</i> is simple; since folders don't have a blob-storage\n  component, creating a folder just involves storing some metadata in our\n  key-value stores.\n</p>\n\n<p>\n  <i>UploadFile</i> works in two steps. The first is to store the blobs that\n  make up the file in the blob storage. Once the blobs are persisted, we can\n  create the file-info object, store the blob-content hashes inside its\n  <b>blobs</b> field, and write this metadata to our key-value stores.\n</p>\n\n<p>\n  <i>DownloadFile</i> fetches the file's metadata from our key-value stores\n  given the file's ID. The metadata contains the hashes of all of the blobs that\n  make up the content of the file, which we can use to fetch all of the blobs\n  from blob storage. We can then assemble them into the file and save it onto\n  local disk.\n</p>\n\n<p>\n  All of the <i>Get</i>, <i>Rename</i>, <i>Move</i>, and\n  <i>Delete</i> operations atomically change the metadata of one or several\n  entities within our key-value stores using the <b>transaction</b>\n  guarantees that they give us.\n</p>"
+        },
+        {
+            "title": "System Diagram",
+            "content": "<img\n  width=\"100%\"\n  src=\"https://assets.algoexpert.io/course-assets/systemsexpert/google-drive-system-diagram.svg\"\n  alt=\"Final Systems Architecture\"\n/>"
+        }
+    ],
+    "hints": [
+        {
+            "question": "Are we just designing the storage aspect of Google Drive, or are we also designing some of the related  products like Google Docs, Sheets, Slides, Drawings, etc.?",
+            "answer": "We're just designing the core Google Drive product, which is indeed the storage product. In other words, users can create folders and upload files, which effectively stores them in the cloud. Also, for simplicity, we can refer to folders and files as \"entities\"."
+        },
+        {
+            "question": "There are a lot of features on Google Drive, like shared company drives vs. personal drives, permissions on entities (ACLs),  starred files, recently-accessed files, etc.. Are we designing all of these features or just some of them?",
+            "answer": "Let's keep things narrow and imagine that we're designing a personal Google Drive (so you can forget about shared company drives). In a personal Google Drive, users can store entities, and that's all that you should take care of. Ignore any feature that isn't core to the storage aspect of Google Drive; ignore things like starred files, recently-accessed files, etc.. You can even ignore sharing entities for this design."
+        },
+        {
+            "question": "Since we're primarily concerned with storing entities, are we supporting all basic CRUD operations  like creating, deleting, renaming, and moving entities?",
+            "answer": "Yes, but to clarify, creating a file is actually uploading a file, folders have to be created (they can't be uploaded), and we also want to support downloading files."
+        },
+        {
+            "question": "Are we just designing the Google Drive web application, or are we also designing a desktop client for Google drive?",
+            "answer": "We're just designing the functionality of the Google Drive web application."
+        },
+        {
+            "question": "Since we're not dealing with sharing entities, should we handle multiple  users in a single folder at the same time, or can we assume that this will never happen?",
+            "answer": "While we're not designing the sharing feature, let's still handle what would happen if  multiple clients were in a single folder at the same time (two tabs from the same browser, for example). In this case, we would want changes made in that folder to be reflected to all clients within 10 seconds. But for the purpose of this question, let's not worry about conflicts or anything like that (i.e., assume that two clients won't make changes to the same file or folder at the same time)."
+        },
+        {
+            "question": "How many people are we building this system for?",
+            "answer": "This system should serve about a billion users and handle 15GB per user on average."
+        },
+        {
+            "question": "What kind of reliability or guarantees does this Google Drive service give to its users?",
+            "answer": "First and foremost, data loss isn't tolerated at all; we need to make sure that once a file is uploaded or a folder is created, it won't disappear until the user deletes it. As for availability, we need this system to be highly available."
+        }
+    ]
+}

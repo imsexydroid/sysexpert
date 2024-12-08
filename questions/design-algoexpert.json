@@ -1,0 +1,98 @@
+{
+    "uid": "design-algoexpert",
+    "name": "Design AlgoExpert",
+    "acl": {
+        "isFree": false,
+        "isFreeForStudents": false,
+        "productRequired": [
+            "systemsexpert"
+        ],
+        "isAvailable": true
+    },
+    "releaseDate": "2020-02-10T00:00:00-05:00",
+    "isReleased": true,
+    "video": {
+        "vimeoId": "390429504",
+        "duration": 0,
+        "annotations": [],
+        "instructor": "",
+        "style": "interview"
+    },
+    "prompt": "",
+    "walkthrough": [
+        {
+            "title": "Gathering System Requirements",
+            "content": "<p>\n  As with any systems design interview question, the first thing that we want to\n  do is to gather system requirements; we need to figure out what system we're\n  building exactly.\n</p>\n<p>\n  From the answers we were given to our clarifying questions (see Prompt Box),\n  we're building the core AlgoExpert user flow, which includes users landing on\n  the website, accessing questions, marking them as complete, writing code,\n  running code, and having their code saved.\n</p>\n<p>\n  We don't need to worry about payments or authentication, and we don't need to\n  go too deep into the code-execution engine.\n</p>\n<p>\n  We're building this platform for a global audience, with an emphasis on U.S.\n  and India users, and we don't need to overly optimize our system's\n  availability. We probably don't need more than two or three nines, because\n  we're not building a health or security system, and this gets us somewhere\n  between <b>8 hours and 3 days</b> of downtime per year, which is reasonable.\n  All in all, this means that we don't need to worry <i>too</i> much about\n  availability.\n</p>\n<p>\n  We care about latency and throughput within reason, but apart from the\n  code-execution engine, this doesn't seem like a particularly difficult aspect\n  of our system.\n</p>"
+        },
+        {
+            "title": "Coming Up With A Plan",
+            "content": "<p>\n  It's important to organize ourselves and to lay out a clear plan regarding how\n  we're going to tackle our design. What are the major, distinguishable\n  components of our how system?\n</p>\n<p>\n  On the one hand, AlgoExpert has a lot of static content; the entire home page,\n  for instance, is static, and it has a lot of images. On the other hand,\n  AlgoExpert isn't <i>just</i> a static website; it clearly has a lot of dynamic\n  content that users themselves can generate (code that they can write, for\n  example). So we'll need to have a robust API backing our UI, and given that\n  user content gets saved on the website, we'll also need a database backing our\n  API.\n</p>\n<p>\n  We can divide our system into 3 core components:\n</p>\n<ul>\n  <li>Static UI content</li>\n  <li>\n    Accessing and interacting with questions (question completion status,\n    saving solutions, etc.)\n  </li>\n  <li>Ability to run code</li>\n</ul>\n<p>\n  Note that the second bullet point will likely get further divided.\n</p>"
+        },
+        {
+            "title": "Static UI Content",
+            "content": "<p>\n  For the UI static content, we can put public assets like images and JavaScript\n  bundles in a blob store: <b>S3 or Google Cloud Storage</b>. Since we're catering to a\n  global audience and we care about having a responsive website (especially the\n  home page of the website), we might want to use a\n  <b>Content Delivery Network</b> (CDN) to serve that content. This is\n  especially important for a better mobile experience because of the slow\n  connections that phones use.\n</p>"
+        },
+        {
+            "title": "Main Clusters And Load Balancing",
+            "content": "<p>\n  For our main backend servers, we can have <b>2 primary clusters</b> in the 2\n  important regions: U.S. and India.\n</p>\n<p>\n  We can have some DNS load balancing to route API requests to the cluster\n  closest to the user issuing the requests, and within a region, we can have\n  some <b>path-based load balancing</b> to separate our services (payments,\n  authentication, code execution, etc.), especially since the code execution\n  platform will probably need to run on different kinds of servers compared to\n  those of the rest of the API. Each service can probably have a set of servers,\n  and we can do some round-robin load balancing at that level (this is probably\n  handled directly at the path-based load balancing layer).\n</p>"
+        },
+        {
+            "title": "Static API Content",
+            "content": "<p>\n  There's a lot of static API content on AlgoExpert: namely, the list of\n  questions and all of their solutions. We can store all of this data in a blob\n  store for simplicity.\n</p>"
+        },
+        {
+            "title": "Caching",
+            "content": "<p>\n  We can implement 2 layers of caching for this static API content.\n</p>\n<p>\n  We can have client-side caching; this will improve the user experience on the\n  platform (users will only need to load questions once per session), and this\n  will reduce the load on our backend servers (this will probably save 2-3\n  network calls per session).\n</p>\n<p>\n  We can also have some in-memory caching on our servers. If we approximate 100\n  questions with 10 languages and 5KB per solution, this should be less than\n  <b>100 * 10 * 5000 bytes = 5MB</b> of total data to keep in memory, which\n  is perfectly fine.\n</p>\n\n<p>\n  Since we were told that we want to make changes to static API content every\n  couple of days and that we want those changes to be reflected in production as\n  soon as possible, we can invalidate, evict and replace the data in our\n  server-side caches every 30 minutes or so.\n</p>"
+        },
+        {
+            "title": "Access Control",
+            "content": "<p>\n  Whenever you're designing a system, it's important to think about any potential\n  access control that needs to be implemented. In the case of AlgoExpert,\n  there's straightforward access control with regards to question content: users\n  who haven't purchased AlgoExpert can't access individual questions. We can\n  implement this fairly easily by just making some internal API call whenever a\n  user requests our static API content to figure out if the user owns the\n  product before returning the full content for questions.\n</p>"
+        },
+        {
+            "title": "User Data Storage",
+            "content": "<p>\n  For user data, we have to design the storage of question completion status and\n  of user solutions to questions. Since this data will have to be queried a lot,\n  a SQL database like <b>Postgres or MySQL</b> seems like a good choice.\n</p>\n<p>\n  We can have 2 tables. The first table might be\n  <b>question_completion_status</b>, which would probably have the following\n  columns:\n</p>\n<ul>\n  <li>id: <i>integer</i>, primary key (an auto-incremented integer for instance)</li>\n  <li>\n    user_id: <i>string</i>, references the id of the user (can be obtained from\n    auth)\n  </li>\n  <li>question_id: <i>string</i>, references the id of the question</li>\n  <li>\n    completion_status: <i>string</i>, enum to represent the completion status of the\n    question\n  </li>\n</ul>\n<p>\n  We could have a uniqueness constraint on (user_id, question_id) and an index\n  on user_id for fast querying.\n</p>\n\n<p>The second table might be <b>user_solutions</b>:</p>\n<ul>\n  <li>id: <i>integer</i>, primary key (an auto-incremented integer for instance)</li>\n  <li>\n    user_id: <i>string</i>, references the id of the user (can be obtained from\n    auth)\n  </li>\n  <li>question_id: <i>string</i>,references the id of the question</li>\n  <li>language: <i>string</i>, references the language of the solution</li>\n  <li>solution: <i>string</i>, contains the user's solution</li>\n</ul>\n<p>\n  We could have a uniqueness constraint on (<b>user_id, question_id, language</b>) and\n  an index on <b>user_id</b> as well as one on <b>question_id</b>. If the number of\n  languages goes up significantly, we might also want to index on language to allow\n  for fast per-language querying so that the UI doesn't fetch all of a user's\n  solutions at the same time (this might be a lot of data for slow connections).\n</p>"
+        },
+        {
+            "title": "Storage Performance",
+            "content": "<p>\n  Marking questions as complete and typing code in the coding workspace (with a\n  1-3 second <b>debounce</b> for performance reasons) will issue API calls that\n  write to the database. We likely won't get more than <b>1000 writes per second</b>\n  given our user numbers (assuming roughly 10,000 users on the platform at any\n  given point in time), which SQL databases can definitely handle.\n</p>\n\n<p>\n  We can have 2 major database servers, each serving our 2 main regions: 1 in\n  North America and 1 in India (perhaps serving Southeast Asia). If need be, we\n  can add a 3rd cluster serving Europe exclusively (or other parts of the world,\n  as our platform grows).\n</p>"
+        },
+        {
+            "title": "Inter-Region Replication",
+            "content": "<p>\n  Since we'll have 2 primary database servers, we'll need to keep them up to\n  date with each other. Fortunately, users on AlgoExpert don't share\n  user-generated content; this means that we don't need data that's written to 1\n  database server to immediately be written to the other database server (this\n  would likely have eliminated the latency improvements we got by having\n  regional databases).\n</p>\n<p>\n  That being said, we <i>do</i> need to keep our databases up to date with each\n  other, since users might travel around the world and hit a different database\n  server than their typical one.\n</p>\n<p>\n  For this, we can have some async replication between our database servers. The\n  replication can occur every 12 hours, and we can adjust this according to\n  behavior in the system and amount of data that gets replicated across continents.\n</p>"
+        },
+        {
+            "title": "Code Execution",
+            "content": "<p>\n  First of all, we should implement some rate limiting. A service like code\n  execution lends itself perfectly to rate limiting, and we can implement some\n  tier-based rate limiting using a K-V Store like <b>Redis</b> to easily prevent DoS\n  attacks. We can limit the number of code runs to once every second, 3 times\n  per 5 seconds, and 5 times per minute. This will prevent DoS attacks through\n  the code-execution API, but it'll still allow for a good user experience when\n  running code.\n</p>\n\n<p>\n  Since we want 1-3 seconds of latency for running code, we need to keep a set\n  of special servers--our \"workers\"-- ready to run code at all times. They can\n  each clean up after running user code (remove extra generated files as a\n  result of compilation, for example) so that they don\u2019t need to be killed at\n  any point. Our backend servers can contact a free worker and get the response\n  from that worker when it's done running code (or if the code timed out), and\n  our servers can return that to the UI in the same request.\n</p>\n\n<p>\n  Given that certain languages need to be compiled, we can estimate that it\n  would take on average 1 second to compile and run the code for each language.\n  People don\u2019t run code that often, so we can expect 10 run-codes per second in\n  total given roughly 10,000 users on the website at once, so we'll probably\n  need 10-100 machines to satisfy our original latency requirement of 1-3\n  seconds per run-code (10 machines if 10 run-codes per second is accurate, more\n  if we experience higher load).\n</p>\n\n<p>\n  This design scales horizontally with our number of users, and it can scale\n  vertically to make running code even faster (more CPU == faster runs).\n</p>\n<p>\n  Lastly, we can have some logging and monitoring in our system, especially for\n  running code (tracking run-code events per language, per user, per question,\n  average response time, etc.). This will help us automatically scale our\n  clusters when user demand goes up or down. This can also be useful to know if\n  any malicious behavior is happening with the code-execution engine.\n</p>"
+        },
+        {
+            "title": "System Diagram",
+            "content": "<img\n  width=\"100%\"\n  src=\"https://assets.algoexpert.io/course-assets/systemsexpert/algoexpert-system-diagram.svg\"\n  alt=\"Final Systems Architecture\"\n/>"
+        }
+    ],
+    "hints": [
+        {
+            "question": "Are we designing the entire AlgoExpert platform or just a specific part of it, like the coding workspace?",
+            "answer": "Since we only have about 45 minutes, you should just design the core user flow of the AlgoExpert platform. The core user flow includes users landing on the home page of the website, going to the questions list, marking questions as complete or in progress, and then writing and running code in various languages for each language. Don't worry about payments or authentication; you can just assume that you have these services working already (by the way, we mainly rely on third-party services here, like Stripe, PayPal, and OAuth2)."
+        },
+        {
+            "question": "AlgoExpert doesn't seem like a system of utmost criticality (like a hospital system or airplane software); are we  okay with 2 to 3 nines of availability for the system?",
+            "answer": "Yes, this seems fine--no need to focus too much on making the system highly available."
+        },
+        {
+            "question": "How many customers should we be building this for? Is AlgoExpert's audience global or limited to one country?",
+            "answer": "AlgoExpert\u2019s website receives hundreds of thousands of users every month, and tens of thousands of users may be on the website at any point in time. We want the website to feel very responsive to people everywhere in the world, and the U.S. and India are the platform's top 2 markets that we especially want to cater to."
+        },
+        {
+            "question": "Does AlgoExpert make changes to its content (questions list and question solutions) often?",
+            "answer": "Yes--every couple of days on average. And we like to have our changes reflected in production globallywithin the hour."
+        },
+        {
+            "question": "How much of the code-execution engine behind the coding workspace should we be designing? Do we have to worry  about the security aspect of running random user code on our servers?",
+            "answer": "You can disregard the security aspects of the code-execution engine and just focus on its core functionality--the ability to run code in various languages at any given time with acceptable latency."
+        },
+        {
+            "question": "While we'll care about latency across the entire system, the code-execution engine seems like the place where  we'll care about it most, since it's very interactive, and it also seems like the toughest part of our system to  support low latencies; are we okay with anywhere between 1 and 3 seconds for the average run-code latency?",
+            "answer": "Yes--this seems reasonable and acceptable from a product point of view."
+        }
+    ]
+}
